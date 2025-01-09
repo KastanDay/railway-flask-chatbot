@@ -1,0 +1,7 @@
+langchain_community==0.3.11
+langchain_core==0.3.24
+langchain_openai==0.2.12
+langgraph==0.2.58
+pydantic==2.10.3
+python-dotenv==1.0.1
+SQLAlchemy==2.0.36
