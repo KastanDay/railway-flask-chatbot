@@ -214,6 +214,26 @@ def updateDocumentMaps(service: NomicService, flaskExecutor: ExecutorInterface):
   response.headers.add('Access-Control-Allow-Origin', '*')
   return response
 
+@app.route('/cleanUpConversationMaps', methods=['GET'])
+def cleanUpConversationMaps(service: NomicService, flaskExecutor: ExecutorInterface):
+  print("Starting conversation map cleanup...")
+
+  response = flaskExecutor.submit(service.clean_up_conversation_maps)
+
+  response = jsonify({"outcome": "Task started"})
+  response.headers.add('Access-Control-Allow-Origin', '*')
+  return response
+
+@app.route('/cleanUpDocumentMaps', methods=['GET'])
+def cleanUpDocumentMaps(service: NomicService, flaskExecutor: ExecutorInterface):
+  print("Starting document map cleanup...")
+
+  response = flaskExecutor.submit(service.clean_up_document_maps)
+
+  response = jsonify({"outcome": "Task started"})
+  response.headers.add('Access-Control-Allow-Origin', '*')
+  return response
+
 
 @app.route('/createDocumentMap', methods=['GET'])
 def createDocumentMap(service: NomicService):

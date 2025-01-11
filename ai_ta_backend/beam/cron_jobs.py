@@ -14,6 +14,8 @@ def task():
   print("Hi, from your task running at 6 AM UTC (12 AM CST) daily!")
   base_url = "https://flask-production-751b.up.railway.app"
 
+  print("Temporarily disabled")
+
   # Update conversation maps
   url = f"{base_url}/updateConversationMaps"
   try:
