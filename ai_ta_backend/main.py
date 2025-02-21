@@ -12,6 +12,7 @@ from flask import (
     jsonify,
     make_response,
     request,
+    send_file,
     send_from_directory,
 )
 from flask_cors import CORS
@@ -35,6 +36,7 @@ from ai_ta_backend.executors.thread_pool_executor import (
     ThreadPoolExecutorInterface,
 )
 from ai_ta_backend.service.export_service import ExportService
+from ai_ta_backend.service.metadata_extraction_service import DocumentMetadataProcessor
 from ai_ta_backend.service.nomic_service import NomicService
 from ai_ta_backend.service.posthog_service import PosthogService
 from ai_ta_backend.service.project_service import ProjectService
@@ -718,6 +720,68 @@ def send_transactional_email(service: ExportService):
   return response
 
 
+@app.route('/generateMetadata', methods=['POST'])
+def generate_metadata(service: DocumentMetadataProcessor, flaskExecutor: ExecutorInterface) -> Response:
+  """
+    Generate metadata for Cedar Bluff documents and return CSV download.
+    """
+  print("In generateMetadata")
+  try:
+    data = request.get_json()
+    metadata_prompt = data.get('metadata_prompt', '')
+    document_ids = data.get('document_ids', [])
+
+    # Get initial run_id
+    generator = service.process_documents(input_prompt=metadata_prompt, document_ids=document_ids)
+    initial_response = next(generator)
+    run_id = initial_response['run_id']
+
+    # Continue processing in background
+    def continue_processing():
+      try:
+        for _ in generator:  # Consume the rest of the generator
+          pass
+      except Exception as e:
+        print(f"Background processing error: {str(e)}")
+
+    flaskExecutor.submit(continue_processing)
+
+    response = jsonify({"run_id": run_id})
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    return response
+
+  except Exception as e:
+    print(f"Error generating metadata: {str(e)}")
+    response = jsonify({"error": str(e)})
+    response.status_code = 500
+    return response
+
+
+@app.route('/downloadMetadataCSV', methods=['POST'])
+def download_metadata_csv(service: DocumentMetadataProcessor) -> Response:
+  """
+  Download metadata CSV for Cedar Bluff documents.
+  """
+  print("In downloadMetadataCSV")
+  data = request.get_json()
+  run_ids = data.get('run_ids', [])
+
+  # Generate CSV file
+  csv_path = service.download_metadata_csv(run_ids=run_ids)
+  if not csv_path or not os.path.exists(csv_path[0]):
+    response = jsonify({"error": "Failed to generate CSV"})
+    response.status_code = 500
+    return response
+
+  # Return file for download
+  directory = os.path.dirname(csv_path[0])
+  response = make_response(send_from_directory(directory=directory, path=csv_path[1], as_attachment=True))
+  response.headers.add('Access-Control-Allow-Origin', '*')
+  response.headers["Content-Disposition"] = f"attachment; filename={csv_path[1]}"
+  os.remove(csv_path[0])
+  return response
+
+
 @app.route('/updateProjectDocuments', methods=['GET'])
 def updateProjectDocuments(flaskExecutor: ExecutorInterface) -> Response:
   project_name = request.args.get('project_name', default='', type=str)
@@ -745,6 +809,7 @@ def configure(binder: Binder) -> None:
   binder.bind(SQLDatabase, to=SQLDatabase, scope=SingletonScope)
   binder.bind(AWSStorage, to=AWSStorage, scope=SingletonScope)
   binder.bind(ExecutorInterface, to=FlaskExecutorAdapter(executor), scope=SingletonScope)
+  binder.bind(DocumentMetadataProcessor, to=DocumentMetadataProcessor, scope=SingletonScope)
 
 
 FlaskInjector(app=app, modules=[configure])

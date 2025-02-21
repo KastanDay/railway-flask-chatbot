@@ -1,30 +1,33 @@
 import os
-from typing import Dict, TypedDict, List, Union
-
-from injector import inject
+from typing import Dict, List, TypedDict, Union
 
 import supabase
+from injector import inject
+
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 
 class ProjectStats(TypedDict):
-    total_messages: int
-    total_conversations: int
-    unique_users: int
-    avg_conversations_per_user: float
-    avg_messages_per_user: float
-    avg_messages_per_conversation: float
+  total_messages: int
+  total_conversations: int
+  unique_users: int
+  avg_conversations_per_user: float
+  avg_messages_per_user: float
+  avg_messages_per_conversation: float
+
 
 class WeeklyMetric(TypedDict):
-    current_week_value: int
-    metric_name: str
-    percentage_change: float
-    previous_week_value: int
+  current_week_value: int
+  metric_name: str
+  percentage_change: float
+  previous_week_value: int
+
 
 class ModelUsage(TypedDict):
-    model_name: str
-    count: int
-    percentage: float
+  model_name: str
+  count: int
+  percentage: float
+
 
 class SQLDatabase:
 
@@ -126,12 +129,14 @@ class SQLDatabase:
 
   def getCountFromDocuments(self, course_name: str, last_id: int):
     if last_id == 0:
-      return self.supabase_client.table("documents").select("id", count='exact').eq("course_name",
-        course_name).order('id', desc=False).execute()
+      return self.supabase_client.table("documents").select("id",
+                                                            count='exact').eq("course_name",
+                                                                              course_name).order('id',
+                                                                                                 desc=False).execute()
     else:
-      return self.supabase_client.table("documents").select("id", count='exact').eq("course_name",
-        course_name).gt("id", last_id).order('id', desc=False).execute()
-                                                                                                            
+      return self.supabase_client.table("documents").select("id", count='exact').eq("course_name", course_name).gt(
+          "id", last_id).order('id', desc=False).execute()
+
   def getDocMapFromProjects(self, course_name: str):
     return self.supabase_client.table("projects").select("doc_map_id").eq("course_name", course_name).execute()
 
@@ -183,157 +188,192 @@ class SQLDatabase:
 
   def insertProject(self, project_info):
     return self.supabase_client.table("projects").insert(project_info).execute()
-  
+
   def getPreAssignedAPIKeys(self, email: str):
-    return self.supabase_client.table("pre_authorized_api_keys").select("*").contains("emails", '["' + email + '"]').execute()
-  
+    return self.supabase_client.table("pre_authorized_api_keys").select("*").contains("emails",
+                                                                                      '["' + email + '"]').execute()
+
   def getConversationsCreatedAtByCourse(self, course_name: str):
     try:
-        count_response = self.supabase_client.table("llm-convo-monitor")\
-            .select("created_at", count="exact")\
-            .eq("course_name", course_name)\
-            .execute()
-        
-        total_count = count_response.count if hasattr(count_response, 'count') else 0
-        
-        if total_count <= 0:
-            print(f"No conversations found for course: {course_name}")
-            return [], 0
+      count_response = self.supabase_client.table("llm-convo-monitor")\
+          .select("created_at", count="exact")\
+          .eq("course_name", course_name)\
+          .execute()
 
-        all_data = []
-        batch_size = 1000
-        start = 0
+      total_count = count_response.count if hasattr(count_response, 'count') else 0
 
-        while start < total_count:
-            end = min(start + batch_size - 1, total_count - 1)
+      if total_count <= 0:
+        print(f"No conversations found for course: {course_name}")
+        return [], 0
 
-            try:
-                response = self.supabase_client.table("llm-convo-monitor")\
-                    .select("created_at")\
-                    .eq("course_name", course_name)\
-                    .range(start, end)\
-                    .execute()
+      all_data = []
+      batch_size = 1000
+      start = 0
 
-                if not response or not hasattr(response, 'data') or not response.data:
-                    print(f"No data returned for range {start} to {end}.")
-                    break
+      while start < total_count:
+        end = min(start + batch_size - 1, total_count - 1)
 
-                all_data.extend(response.data)
-                start += batch_size
+        try:
+          response = self.supabase_client.table("llm-convo-monitor")\
+              .select("created_at")\
+              .eq("course_name", course_name)\
+              .range(start, end)\
+              .execute()
 
-            except Exception as batch_error:
-                print(f"Error fetching batch {start}-{end}: {str(batch_error)}")
-                continue
+          if not response or not hasattr(response, 'data') or not response.data:
+            print(f"No data returned for range {start} to {end}.")
+            break
 
-        if not all_data:
-            print(f"No conversation data could be retrieved for course: {course_name}")
-            return [], 0
+          all_data.extend(response.data)
+          start += batch_size
 
-        return all_data, len(all_data)
+        except Exception as batch_error:
+          print(f"Error fetching batch {start}-{end}: {str(batch_error)}")
+          continue
+
+      if not all_data:
+        print(f"No conversation data could be retrieved for course: {course_name}")
+        return [], 0
+
+      return all_data, len(all_data)
 
     except Exception as e:
-        print(f"Error in getConversationsCreatedAtByCourse for {course_name}: {str(e)}")
-        return [], 0
-  
+      print(f"Error in getConversationsCreatedAtByCourse for {course_name}: {str(e)}")
+      return [], 0
+
   def getProjectStats(self, project_name: str) -> ProjectStats:
     try:
-        response = self.supabase_client.table("project_stats").select("total_messages, total_conversations, unique_users")\
-                    .eq("project_name", project_name).execute()
-        
-        stats: Dict[str, int | float] = {
-            "total_messages": 0,
-            "total_conversations": 0,
-            "unique_users": 0,
-            "avg_conversations_per_user": 0.0,
-            "avg_messages_per_user": 0.0,
-            "avg_messages_per_conversation": 0.0
-        }
-        
-        if response and hasattr(response, 'data') and response.data:
-            base_stats = response.data[0]
-            stats.update(base_stats)
-            
-            if stats["unique_users"] > 0:
-                stats["avg_conversations_per_user"] = float(round(stats["total_conversations"] / stats["unique_users"], 2))
-                stats["avg_messages_per_user"] = float(round(stats["total_messages"] / stats["unique_users"], 2))
-            
-            if stats["total_conversations"] > 0:
-                stats["avg_messages_per_conversation"] = float(round(stats["total_messages"] / stats["total_conversations"], 2))
-                
-        # Convert stats to proper types before creating ProjectStats
-        stats_typed = {
-            "total_messages": int(stats["total_messages"]),
-            "total_conversations": int(stats["total_conversations"]),
-            "unique_users": int(stats["unique_users"]),
-            "avg_conversations_per_user": float(stats["avg_conversations_per_user"]),
-            "avg_messages_per_user": float(stats["avg_messages_per_user"]),
-            "avg_messages_per_conversation": float(stats["avg_messages_per_conversation"])
-        }
-        return ProjectStats(**stats_typed)
-        
+      response = self.supabase_client.table("project_stats").select("total_messages, total_conversations, unique_users")\
+                  .eq("project_name", project_name).execute()
+
+      stats: Dict[str, int | float] = {
+          "total_messages": 0,
+          "total_conversations": 0,
+          "unique_users": 0,
+          "avg_conversations_per_user": 0.0,
+          "avg_messages_per_user": 0.0,
+          "avg_messages_per_conversation": 0.0
+      }
+
+      if response and hasattr(response, 'data') and response.data:
+        base_stats = response.data[0]
+        stats.update(base_stats)
+
+        if stats["unique_users"] > 0:
+          stats["avg_conversations_per_user"] = float(round(stats["total_conversations"] / stats["unique_users"], 2))
+          stats["avg_messages_per_user"] = float(round(stats["total_messages"] / stats["unique_users"], 2))
+
+        if stats["total_conversations"] > 0:
+          stats["avg_messages_per_conversation"] = float(
+              round(stats["total_messages"] / stats["total_conversations"], 2))
+
+      # Convert stats to proper types before creating ProjectStats
+      stats_typed = {
+          "total_messages": int(stats["total_messages"]),
+          "total_conversations": int(stats["total_conversations"]),
+          "unique_users": int(stats["unique_users"]),
+          "avg_conversations_per_user": float(stats["avg_conversations_per_user"]),
+          "avg_messages_per_user": float(stats["avg_messages_per_user"]),
+          "avg_messages_per_conversation": float(stats["avg_messages_per_conversation"])
+      }
+      return ProjectStats(**stats_typed)
+
     except Exception as e:
-        print(f"Error fetching project stats for {project_name}: {str(e)}")
-        return ProjectStats(
-            total_messages=0,
-            total_conversations=0,
-            unique_users=0,
-            avg_conversations_per_user=0.0,
-            avg_messages_per_user=0.0,
-            avg_messages_per_conversation=0.0
-        )
+      print(f"Error fetching project stats for {project_name}: {str(e)}")
+      return ProjectStats(total_messages=0,
+                          total_conversations=0,
+                          unique_users=0,
+                          avg_conversations_per_user=0.0,
+                          avg_messages_per_user=0.0,
+                          avg_messages_per_conversation=0.0)
 
   def getWeeklyTrends(self, project_name: str) -> List[WeeklyMetric]:
-    response = self.supabase_client.rpc('calculate_weekly_trends', {
-            'course_name_input': project_name
-        }).execute()
-    
+    response = self.supabase_client.rpc('calculate_weekly_trends', {'course_name_input': project_name}).execute()
+
     if response and hasattr(response, 'data'):
-        return [WeeklyMetric(
-            current_week_value=item['current_week_value'],
-            metric_name=item['metric_name'],
-            percentage_change=item['percentage_change'],
-            previous_week_value=item['previous_week_value']
-        ) for item in response.data]
-        
+      return [
+          WeeklyMetric(current_week_value=item['current_week_value'],
+                       metric_name=item['metric_name'],
+                       percentage_change=item['percentage_change'],
+                       previous_week_value=item['previous_week_value']) for item in response.data
+      ]
+
     return []
 
   def getModelUsageCounts(self, project_name: str) -> List[ModelUsage]:
-    response = self.supabase_client.rpc('count_models_by_project', {
-            'project_name_input': project_name
-        }).execute()
-        
+    response = self.supabase_client.rpc('count_models_by_project', {'project_name_input': project_name}).execute()
+
     if response and hasattr(response, 'data'):
-        total_count = sum(item['count'] for item in response.data if item.get('model'))
-        
-        model_counts = []
-        for item in response.data:
-            if item.get('model'):
-                percentage = round((item['count'] / total_count * 100), 2) if total_count > 0 else 0
-                model_counts.append(ModelUsage(
-                    model_name=item['model'],
-                    count=item['count'],
-                    percentage=percentage
-                ))
-        
-        return model_counts
-            
+      total_count = sum(item['count'] for item in response.data if item.get('model'))
+
+      model_counts = []
+      for item in response.data:
+        if item.get('model'):
+          percentage = round((item['count'] / total_count * 100), 2) if total_count > 0 else 0
+          model_counts.append(ModelUsage(model_name=item['model'], count=item['count'], percentage=percentage))
+
+      return model_counts
+
     return []
 
   def getAllProjects(self):
-    return self.supabase_client.table("projects").select("course_name, doc_map_id, convo_map_id, last_uploaded_doc_id, last_uploaded_convo_id").execute()
-  
+    return self.supabase_client.table("projects").select(
+        "course_name, doc_map_id, convo_map_id, last_uploaded_doc_id, last_uploaded_convo_id").execute()
+
   def getConvoMapDetails(self):
     return self.supabase_client.rpc("get_convo_maps", params={}).execute()
-  
+
   def getDocMapDetails(self):
     return self.supabase_client.rpc("get_doc_map_details", params={}).execute()
-  
+
   def getProjectsWithConvoMaps(self):
-     return self.supabase_client.table("projects").select("course_name, convo_map_id, last_uploaded_convo_id, conversation_map_index").neq("convo_map_id", None).execute()
-  
+    return self.supabase_client.table("projects").select(
+        "course_name, convo_map_id, last_uploaded_convo_id, conversation_map_index").neq("convo_map_id",
+                                                                                         None).execute()
+
   def getProjectsWithDocMaps(self):
-     return self.supabase_client.table("projects").select("course_name, doc_map_id, last_uploaded_doc_id, document_map_index").neq("doc_map_id", None).execute()
-  
+    return self.supabase_client.table("projects").select(
+        "course_name, doc_map_id, last_uploaded_doc_id, document_map_index").neq("doc_map_id", None).execute()
+
   def getProjectMapName(self, course_name, field_name):
     return self.supabase_client.table("projects").select(field_name).eq("course_name", course_name).execute()
-  
+
+  # def getCedarChunks(self, document_ids: List[int]):
+  #   """
+  #   Fetches all cedar chunks which are ready for metadata extraction.
+  #   """
+  #   return self.supabase_client.rpc("get_cedar_chunks", params={"p_document_ids": document_ids}).execute()
+
+  def insertCedarDocumentMetadata(self, data):
+    return self.supabase_client.table("cedar_document_metadata").insert(data).execute()
+
+  def insertCedarRun(self, data):
+    return self.supabase_client.table("cedar_runs").insert(data).execute()
+
+  def getProcessedCedarDocuments(self):
+    """
+    Fetch all cedar documents which are ready for metadata download.
+    """
+    return self.supabase_client.table("cedar_documents").select("id, readable_filename").eq(
+        "metadata_status", "completed").execute()
+
+  def getCedarDocumentMetadata(self, doc_id):
+    return self.supabase_client.table("cedar_document_metadata").select("*").eq("document_id", doc_id).execute()
+
+  def getCedarChunks(self, doc_id: int):
+    return self.supabase_client.table("cedar_chunks").select("*").eq("document_id", doc_id).execute()
+
+  def getLastRunID(self):
+    return self.supabase_client.table("cedar_runs").select("run_id").not_.is_("run_id", "null").order(
+        "run_id", desc=True).limit(1).execute()
+
+  def getRunData(self, run_ids: str, limit: int = 100, offset: int = 0):
+    return self.supabase_client.rpc("get_run_data", params={
+        "p_run_ids": run_ids,
+        "p_limit": limit,
+        "p_offset": offset
+    }).execute()
+
+  def updateCedarRunStatus(self, doc_id, run_id, data):
+    return self.supabase_client.table("cedar_runs").update(data).eq("document_id", doc_id).eq("run_id",
+                                                                                              run_id).execute()
